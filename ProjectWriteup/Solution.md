@@ -110,15 +110,23 @@ The effect of undistort is minute, however, observable. e.g. the shape of the ca
 ## Describe how (and identify where in your code) you used color transforms, gradients or other methods to create a thresholded binary image. Provide an example of a binary image result.
 
 After experimenting with different gradients and colour channels, I have used 
-1. S channel from HLS colour space
-2. Sobel operator in x direction 
-3. L channel from LUV colour space
-4. B channel from Lab colour space
+1. B channel from Lab colour space
+2. L channel from LUV colour space
 
 to compute the binary map.
 
 
 ```python
+import io
+from PIL import Image
+
+def cvtFigureToImage(fig):
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    im = np.array(Image.open(buf))[:,:,:3]
+    return im
+
 def abs_sobel_thresh(img, orient='x', thresh_min=0, thresh_max=255):
     # Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
@@ -191,7 +199,7 @@ def luv_select(img, thresh=(0, 255)):
     binary_output[(l_channel > thresh[0]) & (l_channel <= thresh[1])] = 1
     return binary_output
 
-def pipeline(img, s_thresh=(170, 255), sx_thresh=(20, 100)):
+def pipeline(img, debugMode=False, s_thresh=(170, 255), sx_thresh=(80, 255)):
     img = cv2.undistort(img, mtx, dist, None, mtx)
 
     # Convert to HLS color space and separate the V channel
@@ -218,7 +226,8 @@ def pipeline(img, s_thresh=(170, 255), sx_thresh=(20, 100)):
     # Note color_binary[:, :, 0] is all 0s, effectively an all black image. It might
     # be beneficial to replace this channel with something else.    
     combined_binary = np.zeros_like(sobelx)
-    combined_binary[(s_binary == 1) | (sobelx == 1) | (l_channel==1) | (b_channel==1)] = 1
+    #combined_binary[(s_binary == 1) | (sobelx == 1) | (l_channel==1) | (b_channel==1)] = 1
+    combined_binary[(l_channel==1) | (b_channel==1)] = 1
     return combined_binary
 
 def colouredMap(img, s_thresh=(170, 255), sx_thresh=(20, 100)):
@@ -289,17 +298,26 @@ some points to test with
 '''
 src=np.array([[220, 720],[1120, 720],[650, 430],[620, 430]])
 dest = np.array([[220, 720],[1120, 720],[1120, 1],[220, 1]]) # 430 in place of 1
-```
 
-
-```python
-bottom_left, bottom_right, top_left, top_right  = [220,720], [1110, 720], [570, 470], [722, 470]
+bottom_left, bottom_right, top_left, top_right  = [220,720], [1110, 720], [570, 470], [720, 470]
 
 source = np.float32([bottom_left,bottom_right,top_right,top_left])
 
 bottom_left, bottom_right, top_left, top_right = [320,720], [920, 720], [320, 1], [920, 1]
 
 dst = np.float32([bottom_left,bottom_right,top_right,top_left])
+```
+
+
+```python
+# get transformation coefficent
+M = cv2.getPerspectiveTransform(source, dst)
+
+# compute inverse transform to be used later
+Minv = cv2.getPerspectiveTransform(dst,source)
+
+def getWarpedImage(img, matrix = M):
+    return cv2.warpPerspective(img, matrix, (imageShape[1], imageShape[0]) , flags=cv2.INTER_LINEAR)
 
 testimg = mpimg.imread('./test_images/straight_lines1.jpg')
 fig, axis = plt.subplots(1,4, figsize=(20,20))
@@ -312,18 +330,14 @@ axis[1].imshow(cv2.polylines(testimg.copy(),[src],True,(255,0,0), thickness=4))
 
 axis[1].set_title('Source Points', fontsize=30)
 
-# get transformation coefficent
-M = cv2.getPerspectiveTransform(source, dst)
 
-# compute inverse transform to be used later
-Minv = cv2.getPerspectiveTransform(dst,source)
 
 # get binary image
 binaryImage = pipeline(testimg)
-warpedBW = cv2.warpPerspective(binaryImage, M, (imageShape[1], imageShape[0]) , flags=cv2.INTER_LINEAR)
+warpedBW = getWarpedImage(binaryImage)
 axis[2].imshow(warpedBW,cmap='gray')
 axis[2].set_title('Warped binary', fontsize=30)
-warped2 = cv2.warpPerspective(testimg, M, (imageShape[1], imageShape[0]) , flags=cv2.INTER_LINEAR)
+warped2 = getWarpedImage(testimg)
 axis[3].imshow(warped2)
 axis[3].set_title('Warped original', fontsize=30)
 plt.show()
@@ -340,10 +354,12 @@ Base of a lane line is identified using a histogram of lower half of the image. 
 
 
 ```python
+
 histogram = np.sum(warpedBW[warpedBW.shape[0]//2:,:], axis=0)
+fig = plt.figure()
 plt.plot(histogram)
 plt.title("Presence of white pixels", fontsize=20)
-plt.show()
+t=plt.show()
 ```
 
 
@@ -518,7 +534,7 @@ right_curverad = ((1 + (2*right_fit[0]*y_eval + right_fit[1])**2)**1.5) / np.abs
 print(left_curverad, right_curverad)
 ```
 
-    11696.9680627 11114.138685
+    11534.5734552 10433.8192105
     
 
 ### Scale corrected radius of curvature
@@ -542,7 +558,7 @@ print('Radius of curvature {:.2f} m'.format((left_curverad+right_curverad)*0.5))
 
 ```
 
-    Radius of curvature 3739.27 m
+    Radius of curvature 3603.44 m
     
 
 ### Offset from center
@@ -552,12 +568,12 @@ print('Radius of curvature {:.2f} m'.format((left_curverad+right_curverad)*0.5))
 # calculate offset of the car from the center
 laneCenter = (left_fitx[-1] + right_fitx[-1])/2
 xm_per_pix = 3.7/700 # meters per pixel in x dimension
-offetPixels = abs(imageShape[0]/2 - laneCenter)
+offetPixels = abs(imageShape[1]/2 - laneCenter)
 offsetDistance = xm_per_pix*offetPixels
 print("Center offset: {:.2f} m".format( offsetDistance))
 ```
 
-    Center offset: 1.35 m
+    Center offset: 0.13 m
     
 
 # Rubric 7:
@@ -612,11 +628,31 @@ lastLeftX=[]
 lastRightX=[]
 MaxHistory = 15
 
+# make a global debug variable
+debugMode = False
+averageLines = False
+
+```
+
+
+```python
+#####################################
+## Complete pipeline in one function
+#####################################
+
+frameCounter = 1
+
 def projectLanes(img):
+    
+    global frameCounter
+    global debugMode
+    global averageLines
+    
+    originalImage = img
     binary_image = pipeline(img)
     
     # warp to get bird's eye view
-    binary_warped = cv2.warpPerspective(binary_image, M, (imageShape[1], imageShape[0]) , flags=cv2.INTER_LINEAR)
+    binary_warped = getWarpedImage(binary_image)
     
     ##
     ## Find lane line coordinates in "binary_warped"
@@ -624,8 +660,18 @@ def projectLanes(img):
     
     # Take a histogram of the bottom half of the image
     histogram = np.sum(binary_warped[binary_warped.shape[0]//2:,:], axis=0)
+    
+    if debugMode:
+        fig = plt.figure()
+        plt.plot(histogram)
+
+        histPlotImage = cvtFigureToImage(fig)
+        fig.clf()
+        plt.close()
     # Create an output image to draw on and  visualize the result
     out_img = np.dstack((binary_warped, binary_warped, binary_warped))*255
+    
+    binary_warped3D = np.copy(out_img)
     # Find the peak of the left and right halves of the histogram
     # These will be the starting point for the left and right lines
     midpoint = np.int(histogram.shape[0]/2)
@@ -646,7 +692,7 @@ def projectLanes(img):
     # Set the width of the windows +/- margin
     margin = 100
     # Set minimum number of pixels found to recenter window
-    minpix = 80
+    minpix = 50
     # Create empty lists to receive left and right lane pixel indices
     left_lane_inds = []
     right_lane_inds = []
@@ -699,22 +745,40 @@ def projectLanes(img):
     left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
     right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
     
+    out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
+    out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
+    
+    if debugMode:
+        fig=plt.figure()
+        plt.imshow(out_img)
+
+        plt.plot(left_fitx, ploty, color='yellow')
+        plt.plot(right_fitx, ploty, color='yellow')
+        plt.xlim(0, 1280)
+        plt.ylim(720, 0)
+
+        rectImage = cvtFigureToImage(fig)
+        fig.clf()
+        plt.close()
+
     # take running averate of past MaxHistory items
-    lastLeftX.append(left_fitx)
-    lastRightX.append(right_fitx)
-        
-    if len(lastLeftX)>MaxHistory:
-        lastLeftX.pop(0)
-        lastRightX.pop(0)
-        tlx = np.zeros_like(left_fitx)
-        for i in range(MaxHistory):
-            tlx = tlx + lastLeftX[i]
-        left_fitx = tlx/MaxHistory
-        
-        tlx = np.zeros_like(right_fitx)
-        for i in range(MaxHistory):
-            tlx = tlx + lastRightX[i]
-        right_fitx = tlx/MaxHistory
+    if averageLines:
+        lastLeftX.append(left_fitx)
+        lastRightX.append(right_fitx)
+
+        if len(lastLeftX)>MaxHistory:
+            lastLeftX.pop(0)
+            lastRightX.pop(0)
+
+            tlx = np.zeros_like(left_fitx)
+            for i in range(MaxHistory):
+                tlx = tlx + lastLeftX[i]
+            left_fitx = tlx/MaxHistory
+
+            trx = np.zeros_like(right_fitx)
+            for i in range(MaxHistory):
+                trx = trx + lastRightX[i]
+            right_fitx = trx/MaxHistory
         
     
     ##
@@ -746,7 +810,7 @@ def projectLanes(img):
     xm_per_pix = 3.7/700 # meters per pixel in x dimension
     
     laneCenter = (left_fitx[-1] + right_fitx[-1])/2    
-    offetPixels = abs(imageShape[0]/2 - laneCenter)
+    offetPixels = abs(imageShape[1]/2 - laneCenter)
     offsetDistance = xm_per_pix*offetPixels
     #print("Center offset: {:.2f} m".format( offsetDistance))
     
@@ -764,31 +828,108 @@ def projectLanes(img):
     
     cv2.putText(result,"Curvature : {:.2f} m".format( (left_curverad+right_curverad)*0.5) , (80, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255,255,255), thickness=2)
     cv2.putText(result, "Offset from Center : {:.2f} m".format( offsetDistance), (80, 140), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255,255,255), thickness=2)
+        
+    if debugMode:    
+        cv2.putText(result, "Frame Counter : {}".format(frameCounter), (80, 200), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255,255,255), thickness=2)
+        frameCounter+=1
+        
+    
+    if debugMode:
+        # combine different images, originalImage binary_warped3D, histPlotImage, rectImage
+        warpedOriginal = cv2.resize(getWarpedImage(originalImage), (imageShape[1]//2, imageShape[0]//2)) 
+        originalImage = cv2.resize(originalImage, (imageShape[1]//2, imageShape[0]//2))     
+        binary_warped3D = cv2.resize(binary_warped3D, (imageShape[1]//2, imageShape[0]//2)) 
+        histPlotImage = cv2.resize(histPlotImage, (imageShape[1]//2, imageShape[0]//2)) 
+        rectImage = cv2.resize(rectImage, (imageShape[1]//2, imageShape[0]//2))
+        finalResult = cv2.resize(result, (imageShape[1]//2, imageShape[0]//2))
+        
+        # concatenate the debug images
+        # concatenate images through different stages of the pipeline
+        result = np.concatenate((np.concatenate((originalImage,binary_warped3D), axis=1),
+                                      np.concatenate((histPlotImage,rectImage), axis=1),
+                                      np.concatenate((warpedOriginal,finalResult), axis=1)),
+                                      axis = 0)
+        
     
     return result
 
+debugMode=True
 result = projectLanes(testimg)
 
 # for sanity check pass one image through the entire pipeline
+plt.figure(figsize=(20,30))
 plt.imshow(result)
-plt.title('Test the entire pipeline', fontsize=30)
+plt.title('Debug Mode : Test the entire pipeline', fontsize=30)
 plt.show()
-    
+
+
 ```
 
 
-![png](output_35_0.png)
+![png](output_36_0.png)
+
+
+
+```python
+debugMode=False
+result = projectLanes(testimg)
+
+fig, axis = plt.subplots(1,2, figsize=(20,5))
+axis[0].imshow(testimg)
+axis[0].set_title('Original Image', fontsize = 30)
+axis[1].set_title('Lanes Projected Image', fontsize = 30)
+axis[1].imshow(result)
+plt.show()
+```
+
+
+![png](output_37_0.png)
 
 
 #### Process the project video and project green lane area
 The final output of processing the project video can be found in 'lanesProjectedVideo.mp4'.
+Create a debugging video by processing the project video, so that I can look inside the pipeline, and find areas for improvment, it can be found in 'debugLanesProjectedVideo.mp4'.
 
 
 ```python
+
+##########################################
+## Create a debug video, with images from 
+## different stages of the pipeline
+##########################################
+
 from moviepy.editor import VideoFileClip
 
+processedVideoFileName = 'debugLanesProjectedVideo.mp4'
+clip = VideoFileClip("./project_video.mp4")
+debugMode=True
+processedVideo = clip.fl_image(projectLanes) 
+%time processedVideo.write_videofile(processedVideoFileName, audio=False)
+```
+
+    [MoviePy] >>>> Building video debugLanesProjectedVideo.mp4
+    [MoviePy] Writing video debugLanesProjectedVideo.mp4
+    
+
+    100%|█████████▉| 1260/1261 [19:22<00:01,  1.01s/it]
+    
+
+    [MoviePy] Done.
+    [MoviePy] >>>> Video ready: debugLanesProjectedVideo.mp4 
+    
+    Wall time: 19min 26s
+    
+
+_ Create final video _
+
+The final output of processing the project video can be found in 'lanesProjectedVideo.mp4'.
+
+
+```python
 processedVideoFileName = 'lanesProjectedVideo.mp4'
 clip = VideoFileClip("./project_video.mp4")
+debugMode=False
+averageLines = True
 processedVideo = clip.fl_image(projectLanes) 
 %time processedVideo.write_videofile(processedVideoFileName, audio=False)
 ```
@@ -797,24 +938,26 @@ processedVideo = clip.fl_image(projectLanes)
     [MoviePy] Writing video lanesProjectedVideo.mp4
     
 
-    100%|█████████▉| 1260/1261 [05:29<00:00,  3.64it/s]
+    100%|█████████▉| 1260/1261 [05:29<00:00,  4.03it/s]
     
 
     [MoviePy] Done.
     [MoviePy] >>>> Video ready: lanesProjectedVideo.mp4 
     
-    Wall time: 5min 33s
+    Wall time: 5min 32s
     
-
-
-```python
-# create a debug video
-```
 
 # Rubric 8: Discussion
 
 I had some difficulty figuring out the correct source and destination points for transforming an image to bird's eye view.
 Finding correctly lane lines when there is shadow on the road is little more difficult than bright lanes. In this case the saturation values start to dip.
+
+###### Challenges in the real world
+This solution should probably work in light rain conditions, however, heavy rain and night conditios would require much fine tuning of paramters and adding a step or two in the pipeline to detect what kind of conditions the car is driving in.
+
+I haven't used the idea that the new lane lines will be closer to the lane lines found in the previous frame. I could use it to speed up the process.
+
+To improve processing, I think a GPU can came in very handy to process multiple frame parallelly, especially for large videos, and real time driving.
 
 I would love to come back and finish the challenge video.
 
