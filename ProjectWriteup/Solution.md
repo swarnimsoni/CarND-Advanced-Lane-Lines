@@ -28,28 +28,31 @@ Following cell perform these operations:
 
 ```python
 # set number of corner points to be found
-nx, ny = 9,5
+nx, ny = 9,6
 
-cameraCalibrationDirectory = './camera_cal/'
-fname = cameraCalibrationDirectory+ 'calibration1.jpg'
-img = cv2.imread(fname)
-imageShape = img.shape
-# Convert to grayscale
-gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+fnames = glob.glob("camera_cal/calibration*.jpg")
+objpoints, imgpoints = [],[]
 
-# Find the chessboard corners
-ret, corners = cv2.findChessboardCorners(gray, (nx, ny), None)
 objp = np.zeros((ny*nx,3),np.float32)
 objp[:,:2] = np.mgrid[0:nx,0:ny].T.reshape(-1,2)
-objpoints, imgpoints = [],[]
-# If found, draw corners
-if ret == True:
-    # add image points and object points
-    imgpoints.append(corners)
-    objpoints.append(objp)
-    # Draw and display the corners
-    imgWithCorners =np.copy(img)
-    cv2.drawChessboardCorners(imgWithCorners, (nx, ny), corners, ret)
+
+for fname  in fnames:
+    img = cv2.imread(fname)
+    imageShape = img.shape
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Find the chessboard corners
+    ret, corners = cv2.findChessboardCorners(gray, (nx, ny), None)
+    
+    # If found, draw corners
+    if ret == True:
+        # add image points and object points
+        imgpoints.append(corners)
+        objpoints.append(objp)
+        # Draw and display the corners
+        imgWithCorners =np.copy(img)
+        cv2.drawChessboardCorners(imgWithCorners, (nx, ny), corners, ret)
     
 ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)    
 ```
@@ -58,18 +61,36 @@ Follwoing is an example of distarted vs undestored image
 
 
 ```python
-fig, axis = plt.subplots(1,2,figsize=(20,5))
-fig.tight_layout()
+def undistortImage(img, M=mtx):
+    return cv2.undistort(img, M, dist, None, M)
 
-axis[0].imshow(imgWithCorners)
-axis[0].set_title('Distorted Image with corners', fontsize=30)
+fig, axis = plt.subplots(1,3,figsize=(20,5))
+fig.tight_layout()
+img = mpimg.imread('camera_cal/calibration2.jpg')
+
+imageShape = img.shape
+# Convert to grayscale
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+# Find the chessboard corners
+ret, corners = cv2.findChessboardCorners(gray, (nx, ny), None)
+
+
+imgWithCorners = np.copy(img)
+cv2.drawChessboardCorners(imgWithCorners, (nx, ny), corners, ret)
+
+axis[0].imshow(img)
+axis[0].set_title('Distorted Image', fontsize=30)
+
+axis[1].imshow(imgWithCorners)
+axis[1].set_title('Distorted Image \n corners detected', fontsize=30)
 
 # undistort image
 undist = cv2.undistort(img, mtx, dist, None, mtx)
     
 # plot undistorted image
-axis[1].imshow(undist)
-axis[1].set_title('Un-distorted Image', fontsize=30)
+axis[2].imshow(undist)
+axis[2].set_title('Un-distorted Image', fontsize=30)
 plt.show()
 ```
 
@@ -200,6 +221,8 @@ def luv_select(img, thresh=(0, 255)):
     return binary_output
 
 def pipeline(img, debugMode=False, s_thresh=(170, 255), sx_thresh=(80, 255)):
+    
+    # first undistort yhe image    
     img = cv2.undistort(img, mtx, dist, None, mtx)
 
     # Convert to HLS color space and separate the V channel
@@ -253,7 +276,7 @@ axis[0].imshow(testimg)
 axis[0].set_title('Original image', fontsize=30)
 axis[1].imshow(pipeline(testimg), cmap='gray')
 #undisttestimg=cv2.undistort(testimg, mtx,dist, None, mtx)
-axis[1].set_title('S Channel + Sobel X + L channel \n + B Channel', fontsize=30)
+axis[1].set_title('L channel + B Channel', fontsize=30)
 plt.show()
 ```
 
@@ -337,7 +360,7 @@ binaryImage = pipeline(testimg)
 warpedBW = getWarpedImage(binaryImage)
 axis[2].imshow(warpedBW,cmap='gray')
 axis[2].set_title('Warped binary', fontsize=30)
-warped2 = getWarpedImage(testimg)
+warped2 = getWarpedImage(undistortImage(testimg))
 axis[3].imshow(warped2)
 axis[3].set_title('Warped original', fontsize=30)
 plt.show()
@@ -534,7 +557,7 @@ right_curverad = ((1 + (2*right_fit[0]*y_eval + right_fit[1])**2)**1.5) / np.abs
 print(left_curverad, right_curverad)
 ```
 
-    11534.5734552 10433.8192105
+    16479.5874482 12053.4907672
     
 
 ### Scale corrected radius of curvature
@@ -558,7 +581,7 @@ print('Radius of curvature {:.2f} m'.format((left_curverad+right_curverad)*0.5))
 
 ```
 
-    Radius of curvature 3603.44 m
+    Radius of curvature 4680.16 m
     
 
 ### Offset from center
@@ -573,7 +596,7 @@ offsetDistance = xm_per_pix*offetPixels
 print("Center offset: {:.2f} m".format( offsetDistance))
 ```
 
-    Center offset: 0.13 m
+    Center offset: 0.14 m
     
 
 # Rubric 7:
@@ -598,7 +621,7 @@ cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
 # Warp the blank back to original image space using inverse perspective matrix (Minv)
 newwarp = cv2.warpPerspective(color_warp, Minv, (imageShape[1], imageShape[0])) 
 # Combine the result with the original image
-result = cv2.addWeighted(testimg, 1, newwarp, 0.3, 0)
+result = cv2.addWeighted(undistortImage(testimg), 1, newwarp, 0.3, 0)
 fig, axis = plt.subplots(1,2, figsize=(20,5))
 fig.tight_layout()
 axis[0].imshow(testimg)
@@ -647,9 +670,11 @@ def projectLanes(img):
     global frameCounter
     global debugMode
     global averageLines
-    
-    originalImage = img
+        
     binary_image = pipeline(img)
+    
+    img = undistortImage(img)
+    originalImage = img
     
     # warp to get bird's eye view
     binary_warped = getWarpedImage(binary_image)
@@ -911,13 +936,13 @@ processedVideo = clip.fl_image(projectLanes)
     [MoviePy] Writing video debugLanesProjectedVideo.mp4
     
 
-    100%|█████████▉| 1260/1261 [19:22<00:01,  1.01s/it]
+    100%|█████████▉| 1260/1261 [20:38<00:01,  1.25s/it]
     
 
     [MoviePy] Done.
     [MoviePy] >>>> Video ready: debugLanesProjectedVideo.mp4 
     
-    Wall time: 19min 26s
+    Wall time: 20min 41s
     
 
 _ Create final video _
@@ -938,13 +963,13 @@ processedVideo = clip.fl_image(projectLanes)
     [MoviePy] Writing video lanesProjectedVideo.mp4
     
 
-    100%|█████████▉| 1260/1261 [05:29<00:00,  4.03it/s]
+    100%|█████████▉| 1260/1261 [06:52<00:00,  3.20it/s]
     
 
     [MoviePy] Done.
     [MoviePy] >>>> Video ready: lanesProjectedVideo.mp4 
     
-    Wall time: 5min 32s
+    Wall time: 6min 55s
     
 
 # Rubric 8: Discussion
